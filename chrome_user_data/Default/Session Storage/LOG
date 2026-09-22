@@ -1,0 +1,8 @@
+2026/09/22-12:29:24.749 65084 Creating DB /Users/roni/Documents/Python/chrome_user_data/Default/Session Storage since it was missing.
+2026/09/22-12:29:24.752 65084 Reusing MANIFEST /Users/roni/Documents/Python/chrome_user_data/Default/Session Storage/MANIFEST-000001
+2026/09/22-12:29:36.815 65088 Level-0 table #5: started
+2026/09/22-12:29:36.823 65088 Level-0 table #5: 974102 bytes OK
+2026/09/22-12:29:36.824 65088 Delete type=0 #3
+2026/09/22-12:30:37.010 65088 Level-0 table #7: started
+2026/09/22-12:30:37.026 65088 Level-0 table #7: 974085 bytes OK
+2026/09/22-12:30:37.029 65088 Delete type=0 #4
