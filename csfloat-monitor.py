@@ -22,7 +22,7 @@ def main():
         
         # Alapértelmezett szűrő: Rifle, Crown (Foil) matrica, Legújabbak elöl
         # Ezt bármikor lecserélheted a saját linkedre!
-        target_url = "https://csfloat.com/search?category=2&stickers=%5B%7B%22i%22%3A50%2C%22n%22%3A%22Crown%20(Foil)%22%7D%5D&sort_by=newest"
+        target_url = "https://csfloat.com/search?sort_by=lowest_price&min_float=0.06&max_float=0.8&type=buy_now&def_index=7&paint_index=14&stickers=%5B%7B%22c%22:%22C393%22%7D%5D"
         print(f"🌐 Oldal megnyitása: {target_url}")
         
         driver.get(target_url)
