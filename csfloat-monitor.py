@@ -26,7 +26,7 @@ def main():
         print(f"🌐 Oldal megnyitása: {target_url}")
         
         driver.get(target_url)
-        time.sleep(3) # Kis várakozás az első betöltésnél
+        time.sleep(5) # Kis várakozás az első betöltésnél
         
         while True:
             print(f"\n🔍 Oldal frissítése... ({time.strftime('%H:%M:%S')})")
