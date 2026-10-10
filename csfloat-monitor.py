@@ -1,18 +1,7 @@
 #!/usr/bin/env python3
 """
 CSFloat listing monitor (undetected-chromedriver)
-
-Features
-- Alerts only on NEW listings (persistent "seen" cache between runs)
-- Optional max price / max float filters
-- Sound, desktop notification and Discord webhook alerts
-- CSV log of every new find
-- Randomized refresh interval + exponential backoff when blocked
-- Auto-restarts the browser if it crashes or is closed
-- Persistent Chrome profile (keeps cookies / Cloudflare clearance / login)
-
-Install:  pip install undetected-chromedriver selenium
-Optional: pip install plyer   (desktop notifications)
+Enhanced for macOS stability, stealth, and memory management.
 """
 
 import csv
@@ -20,11 +9,13 @@ import json
 import random
 import re
 import sys
+import os
 import time
 from datetime import datetime
 from pathlib import Path
 from urllib import request as urlrequest
 
+from dotenv import load_dotenv
 import undetected_chromedriver as uc
 from selenium.common.exceptions import (
     NoSuchWindowException,
@@ -34,31 +25,38 @@ from selenium.common.exceptions import (
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 
+# Load environment variables from .env file
+load_dotenv()
+
 # ============================== CONFIG ==============================
 
-TARGET_URL = (
-    "https://csfloat.com/search?sort_by=most_recent&min_float=0.06&max_float=0.8"
-    "&type=buy_now&def_index=7&paint_index=14&stickers=%5B%7B%22c%22:%22C393%22%7D%5D"
-)
+TARGET_URL = os.getenv("TARGET_URL", "https://csfloat.com")
+DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 
-CHECK_INTERVAL = 15        # base seconds between refreshes
-INTERVAL_JITTER = 5        # +/- random seconds (looks less robotic, avoids rate limits)
+try:
+    MAX_PRICE = float(os.getenv("MAX_PRICE")) if os.getenv("MAX_PRICE") else None
+except ValueError:
+    MAX_PRICE = None
+
+try:
+    MAX_FLOAT = float(os.getenv("MAX_FLOAT")) if os.getenv("MAX_FLOAT") else None
+except ValueError:
+    MAX_FLOAT = None
+
+CHECK_INTERVAL = int(os.getenv("CHECK_INTERVAL", 15))
+INTERVAL_JITTER = 5        # +/- random seconds
 TOP_N = 10                 # how many of the first listings to inspect each round
 PAGE_LOAD_TIMEOUT = 25     # seconds to wait for listing cards to appear
+ALERT_ON_FIRST_RUN = False # False: first scan only records current listings as "seen"
 
-MAX_PRICE = None           # e.g. 150.0 -> ignore listings above $150 (None = no limit)
-MAX_FLOAT = None           # e.g. 0.25  -> ignore listings above this float (None = no limit)
-ALERT_ON_FIRST_RUN = False # False: first scan only records the current listings as "seen"
-
-CHROME_VERSION = None      # None = auto-detect. Set e.g. 153 only if auto-detect fails
-HEADLESS = False           # headless often gets blocked by Cloudflare; keep False
-BLOCK_IMAGES = False       # True = faster page loads, less bandwidth
+CHROME_VERSION = 153       # Locked to your macOS Chrome version for stability
+HEADLESS = False           
+BLOCK_IMAGES = False       
 
 ENABLE_SOUND = True
-ENABLE_DESKTOP_NOTIFICATION = True   # needs `pip install plyer`
-DISCORD_WEBHOOK_URL = ""             # paste a Discord webhook URL to get phone alerts
+ENABLE_DESKTOP_NOTIFICATION = True   
 
-MAX_BROWSER_RESTARTS = 10  # give up after this many consecutive crashes
+MAX_BROWSER_RESTARTS = 10  
 
 BASE_DIR = Path(__file__).resolve().parent
 PROFILE_DIR = BASE_DIR / "chrome_profile"
@@ -80,14 +78,11 @@ return Array.from(document.querySelectorAll('item-card'))
   });
 """
 
-
 def ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
 
-
 def log(msg: str) -> None:
     print(f"[{ts()}] {msg}", flush=True)
-
 
 # ---------------------------- persistence ----------------------------
 
@@ -97,12 +92,9 @@ def load_seen() -> set:
     except (FileNotFoundError, json.JSONDecodeError):
         return set()
 
-
 def save_seen(seen: set) -> None:
-    # keep the cache from growing forever
     items = list(seen)[-2000:]
     SEEN_FILE.write_text(json.dumps(items), encoding="utf-8")
-
 
 def append_csv(row: dict) -> None:
     new_file = not LOG_FILE.exists()
@@ -112,19 +104,21 @@ def append_csv(row: dict) -> None:
             writer.writeheader()
         writer.writerow(row)
 
-
 # ------------------------------ alerts -------------------------------
 
 def beep() -> None:
     if not ENABLE_SOUND:
         return
-    try:
-        import winsound  # Windows only
-        winsound.Beep(1200, 250)
-        winsound.Beep(1600, 250)
-    except ImportError:
-        print("\a", end="", flush=True)
-
+    
+    if sys.platform == "darwin":  # macOS native sound
+        os.system("afplay /System/Library/Sounds/Glass.aiff &")
+    elif sys.platform == "win32": # Windows
+        try:
+            import winsound
+            winsound.Beep(1200, 250)
+            winsound.Beep(1600, 250)
+        except ImportError:
+            print("\a", end="", flush=True)
 
 def desktop_notify(title: str, message: str) -> None:
     if not ENABLE_DESKTOP_NOTIFICATION:
@@ -133,8 +127,7 @@ def desktop_notify(title: str, message: str) -> None:
         from plyer import notification
         notification.notify(title=title, message=message, timeout=8)
     except Exception:
-        pass  # plyer missing or unsupported: silently skip
-
+        pass 
 
 def discord_notify(listing: dict) -> None:
     if not DISCORD_WEBHOOK_URL:
@@ -154,7 +147,6 @@ def discord_notify(listing: dict) -> None:
     except Exception as e:
         log(f"⚠️ Discord webhook failed: {e}")
 
-
 def alert(listing: dict) -> None:
     price = f"${listing['price']:.2f}" if listing["price"] is not None else "?"
     log(f"🆕 {listing['name'][:45].ljust(45)} | 💰 {price:>9} | 🎯 {listing['float'] or '-'}")
@@ -170,7 +162,6 @@ def alert(listing: dict) -> None:
         "float": listing["float"],
         "url": listing["url"],
     })
-
 
 # ------------------------------ browser ------------------------------
 
@@ -190,11 +181,9 @@ def make_driver():
         kwargs["version_main"] = CHROME_VERSION
     return uc.Chrome(**kwargs)
 
-
 def is_blocked(driver) -> bool:
     title = (driver.title or "").lower()
     return any(t in title for t in BLOCK_TITLES)
-
 
 def wait_for_cards(driver) -> bool:
     try:
@@ -205,7 +194,6 @@ def wait_for_cards(driver) -> bool:
     except TimeoutException:
         return False
 
-
 # ------------------------------ parsing ------------------------------
 
 def parse_card(raw: dict) -> dict | None:
@@ -214,7 +202,6 @@ def parse_card(raw: dict) -> dict | None:
         return None
 
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    # Skin names look like "AK-47 | Redline (Field-Tested)"
     name = next((ln for ln in lines if " | " in ln), lines[0])
 
     price_match = PRICE_RE.search(text)
@@ -224,11 +211,9 @@ def parse_card(raw: dict) -> dict | None:
     flt = float_match.group(0) if float_match else None
 
     url = raw.get("href")
-    # Stable unique id: the listing URL; fall back to name+price+float
     uid = url or f"{name}|{price}|{flt}"
 
     return {"id": uid, "name": name, "price": price, "float": flt, "url": url}
-
 
 def passes_filters(listing: dict) -> bool:
     if MAX_PRICE is not None and listing["price"] is not None and listing["price"] > MAX_PRICE:
@@ -237,13 +222,14 @@ def passes_filters(listing: dict) -> bool:
         return False
     return True
 
-
 # ------------------------------ main loop ------------------------------
 
 def monitor(driver, seen: set, first_run: bool) -> None:
-    """Runs until the browser dies or the user stops the script."""
     log(f"🌐 Opening: {TARGET_URL}")
     driver.get(TARGET_URL)
+    
+    # Initial wait to pass Cloudflare on fresh loads
+    time.sleep(10)
 
     backoff = 0
     rounds = 0
@@ -251,9 +237,18 @@ def monitor(driver, seen: set, first_run: bool) -> None:
 
     while True:
         rounds += 1
+        
+        # Memory leak prevention
+        if rounds > 500:
+            log("🧹 Proactive restart to clear Chrome's memory...")
+            return
 
+        # Stealth mechanics: mix of refresh and hard re-navigation
         if rounds > 1:
-            driver.refresh()
+            if random.random() < 0.10:
+                driver.get(TARGET_URL)
+            else:
+                driver.refresh()
 
         if is_blocked(driver):
             backoff = min(max(backoff * 2, 30), 600)
@@ -272,7 +267,6 @@ def monitor(driver, seen: set, first_run: bool) -> None:
         listings = [p for p in (parse_card(r) for r in raw_cards) if p]
 
         new_found = 0
-        # iterate oldest -> newest so alerts come out in chronological order
         for listing in reversed(listings):
             if listing["id"] in seen:
                 continue
@@ -290,12 +284,13 @@ def monitor(driver, seen: set, first_run: bool) -> None:
         elif new_found == 0:
             log(f"… no new listings (round {rounds}, {len(seen)} tracked)")
 
-        total_new += new_found
-        save_seen(seen)
+        # Save only when something actually changes to protect SSD lifespan
+        if new_found > 0:
+            total_new += new_found
+            save_seen(seen)
 
         delay = max(5, CHECK_INTERVAL + random.uniform(-INTERVAL_JITTER, INTERVAL_JITTER))
         time.sleep(delay)
-
 
 def main() -> None:
     print("🚀 CSFloat Monitor starting (Ctrl+C to stop)")
@@ -331,7 +326,6 @@ def main() -> None:
         print("\n🛑 Stopped by user. Bye!")
     finally:
         save_seen(seen)
-
 
 if __name__ == "__main__":
     main()
